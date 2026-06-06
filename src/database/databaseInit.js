@@ -1,18 +1,19 @@
 import * as SQLite from 'expo-sqlite';
 
-// Abre (ou cria) o arquivo do banco de dados no celular
-export const db = SQLite.openDatabaseSync('agendamento_salas.db');
+// Forçamos a criação de um banco V3, limpo e com a nova estrutura de senha
+export const db = SQLite.openDatabaseSync('agendamento_salas_v3.db');
 
 export function inicializarBancoDeDados() {
   try {
-    // Ativa as chaves estrangeiras e cria as tabelas
     db.execSync(`
       PRAGMA foreign_keys = ON;
 
       CREATE TABLE IF NOT EXISTS usuarios (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          nome TEXT NOT NULL,
-          cargo_setor TEXT NOT NULL
+          nome TEXT,
+          email TEXT UNIQUE NOT NULL,
+          cargo_setor TEXT,
+          senha TEXT 
       );
 
       CREATE TABLE IF NOT EXISTS salas (
@@ -32,9 +33,15 @@ export function inicializarBancoDeDados() {
           FOREIGN KEY (id_usuario) REFERENCES usuarios (id) ON DELETE CASCADE,
           FOREIGN KEY (id_sala) REFERENCES salas (id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS sessao (
+          id INTEGER PRIMARY KEY CHECK (id = 1), 
+          id_usuario INTEGER NOT NULL,
+          FOREIGN KEY (id_usuario) REFERENCES usuarios (id) ON DELETE CASCADE
+      );
     `);
-    console.log("Banco de dados inicializado com sucesso!");
+    console.log("Banco de dados V3 (Com suporte a Senha) inicializado com sucesso!");
   } catch (error) {
-    console.error("Erro ao inicializar o banco de dados:", error);
+    console.error("Erro ao inicializar o banco V3:", error);
   }
 }

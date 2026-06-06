@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
-// 1. Importamos o useRouter para permitir a navegação
 import { useFocusEffect, useRouter } from 'expo-router'; 
 import { inicializarBancoDeDados, db } from '../../src/database/databaseInit';
 
@@ -14,7 +13,7 @@ interface Sala {
 
 export default function ListaSalasScreen() {
   const [salas, setSalas] = useState<Sala[]>([]);
-  const router = useRouter(); // 2. Inicializamos o roteador
+  const router = useRouter(); 
 
   useEffect(() => {
     inicializarBancoDeDados();
@@ -28,6 +27,18 @@ export default function ListaSalasScreen() {
 
   function carregarSalas() {
     try {
+      // --- 🔒 TRAVA DE SEGURANÇA (VERIFICA O LOGIN) ---
+      // Vai no banco e olha se tem alguém na tabela de sessão
+      const sessao = db.getFirstSync<{id_usuario: number}>('SELECT id_usuario FROM sessao LIMIT 1');
+      
+      // Se não encontrou uma sessão ativa, expulsa para a tela de login imediatamente
+      if (!sessao) {
+        router.replace('/login');
+        return; 
+      }
+      // ------------------------------------------------
+
+      // Se passou da trava, carrega as salas normalmente
       const query = `
         SELECT s.*, 
         (SELECT COUNT(*) FROM agendamentos a WHERE a.id_sala = s.id) AS qtd_agendamentos
@@ -47,11 +58,16 @@ export default function ListaSalasScreen() {
     }
   }
 
+  function fazerLogout() {
+    // Apaga a sessão do banco local e manda de volta pro login
+    db.runSync('DELETE FROM sessao');
+    router.replace('/login');
+  }
+
   const renderizarSala = ({ item }: { item: Sala }) => {
     const estaOcupada = item.qtd_agendamentos > 0;
 
     return (
-      // 3. Mudamos de <View> para <TouchableOpacity> e adicionamos o clique dinâmico
       <TouchableOpacity 
         style={styles.card} 
         onPress={() => router.push(`/sala/${item.id}`)}
@@ -71,8 +87,16 @@ export default function ListaSalasScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Salas de Reunião</Text>
+      {/* Cabeçalho com Botão de Sair */}
+      <View style={styles.headerRow}>
+        <Text style={styles.header}>Salas de Reunião</Text>
+        <TouchableOpacity onPress={fazerLogout}>
+          <Text style={styles.textoSair}>Sair</Text>
+        </TouchableOpacity>
+      </View>
+      
       <Text style={styles.subHeader}>Toque em uma sala para ver os horários</Text>
+      
       <FlatList 
         data={salas}
         keyExtractor={(item) => item.id.toString()}
@@ -84,12 +108,14 @@ export default function ListaSalasScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4F8', padding: 20, paddingTop: 50 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   header: { fontSize: 24, fontWeight: 'bold', color: '#102A43' },
-  subHeader: { fontSize: 14, color: '#627D98', marginBottom: 20 },
+  textoSair: { fontSize: 16, color: '#DC3545', fontWeight: 'bold' },
+  subHeader: { fontSize: 14, color: '#627D98', marginBottom: 20, marginTop: 5 },
   card: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, elevation: 3 },
   titulo: { fontSize: 18, fontWeight: 'bold', color: '#334E68' },
   texto: { fontSize: 14, color: '#627D98', marginTop: 5 },
   badgeDisponivel: { backgroundColor: '#28A745', padding: 5, borderRadius: 5, marginTop: 10, alignSelf: 'flex-start' },
-  badgeOcupada: { backgroundColor: '#007BFF', padding: 5, borderRadius: 5, marginTop: 10, alignSelf: 'flex-start' }, // Mudei para azul para indicar que é clicável
+  badgeOcupada: { backgroundColor: '#007BFF', padding: 5, borderRadius: 5, marginTop: 10, alignSelf: 'flex-start' },
   badgeTexto: { color: '#FFF', fontSize: 12, fontWeight: 'bold' }
 });

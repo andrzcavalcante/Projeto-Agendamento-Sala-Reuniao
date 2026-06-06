@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { 
+  View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, 
+  Platform, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView 
+} from 'react-native';
 import { useRouter } from 'expo-router'; 
 import { db } from '../../src/database/databaseInit';
-// 1. Importação da nova biblioteca
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 export default function AgendamentoScreen() {
@@ -11,24 +13,18 @@ export default function AgendamentoScreen() {
   const [idSala, setIdSala] = useState<string>('');
   const [duracao, setDuracao] = useState<string>('');
 
-  // 2. Estados para gerenciar as datas reais e a exibição dos pop-ups
   const [dataSelecionada, setDataSelecionada] = useState<Date>(new Date());
   const [horaSelecionada, setHoraSelecionada] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
-  // Strings formatadas para exibir na tela e salvar no banco
   const [dataString, setDataString] = useState<string>('');
   const [horaString, setHoraString] = useState<string>('');
 
-  // 3. Funções que lidam com a escolha no Pop-up
   const aoMudarData = (event: any, selectedDate?: Date) => {
-    // No Android, precisamos fechar o modal manualmente após a escolha
     if (Platform.OS === 'android') setShowDatePicker(false);
-    
     if (selectedDate && event.type !== 'dismissed') {
       setDataSelecionada(selectedDate);
-      // Formata para YYYY-MM-DD
       const formatada = selectedDate.toISOString().split('T')[0];
       setDataString(formatada);
     }
@@ -36,10 +32,8 @@ export default function AgendamentoScreen() {
 
   const aoMudarHora = (event: any, selectedDate?: Date) => {
     if (Platform.OS === 'android') setShowTimePicker(false);
-    
     if (selectedDate && event.type !== 'dismissed') {
       setHoraSelecionada(selectedDate);
-      // Formata para HH:mm
       const hh = String(selectedDate.getHours()).padStart(2, '0');
       const mm = String(selectedDate.getMinutes()).padStart(2, '0');
       setHoraString(`${hh}:${mm}`);
@@ -57,6 +51,8 @@ export default function AgendamentoScreen() {
   }
 
   function salvarAgendamento() {
+    Keyboard.dismiss();
+
     if (!idSala || !dataString || !horaString || !duracao) {
       Alert.alert('Atenção', 'Por favor, preencha todos os campos!');
       return;
@@ -71,15 +67,39 @@ export default function AgendamentoScreen() {
         return; 
       }
 
+      const sessao = db.getFirstSync<{id_usuario: number}>('SELECT id_usuario FROM sessao LIMIT 1');
+      if (!sessao) {
+        Alert.alert('Sessão Expirada', 'Por favor, faça login novamente.');
+        router.replace('/login');
+        return;
+      }
+
       const tempoReuniao = parseInt(duracao);
       const tempoOrganizacao = 20; 
       const horarioTerminoTotal = calcularHorarioTermino(horaString, tempoReuniao + tempoOrganizacao);
 
-      db.runSync("INSERT OR IGNORE INTO usuarios (id, nome, cargo_setor) VALUES (1, 'Usuário Teste', 'Projeto de Extensão')");
+      // 🛑 NOVA TRAVA: CHECAGEM DE CONFLITO DE HORÁRIOS (DOUBLE BOOKING)
+      // A lógica: Um horário cruza com outro se o "Início A" for MENOR que o "Término B" 
+      // E o "Término A" for MAIOR que o "Início B".
+      const conflito = db.getFirstSync<{id: number}>(
+        `SELECT id FROM agendamentos 
+         WHERE id_sala = ? AND data = ? 
+         AND (horario_inicio < ? AND horario_termino > ?)`,
+        [salaID, dataString, horarioTerminoTotal, horaString]
+      );
+
+      if (conflito) {
+        Alert.alert(
+          'Horário Indisponível', 
+          'Já existe uma reserva que entra em conflito com este horário nesta sala. Verifique a agenda.'
+        );
+        return;
+      }
+      // -------------------------------------------------------------
 
       db.runSync(
         'INSERT INTO agendamentos (id_usuario, id_sala, data, horario_inicio, horario_termino) VALUES (?, ?, ?, ?, ?)',
-        [1, salaID, dataString, horaString, horarioTerminoTotal]
+        [sessao.id_usuario, salaID, dataString, horaString, horarioTerminoTotal]
       );
       
       setIdSala(''); setDuracao(''); setDataString(''); setHoraString('');
@@ -96,71 +116,53 @@ export default function AgendamentoScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Novo Agendamento</Text>
-      
-      <Text style={styles.label}>ID da Sala (Ex: 1 ou 2)</Text>
-      <TextInput style={styles.input} keyboardType="numeric" value={idSala} onChangeText={setIdSala} />
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView style={styles.flexContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.container}>
+          <Text style={styles.header}>Novo Agendamento</Text>
+          
+          <Text style={styles.label}>ID da Sala (Ex: 1 ou 2)</Text>
+          <TextInput style={styles.input} keyboardType="numeric" value={idSala} onChangeText={setIdSala} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
 
-      {/* Botão que abre o Pop-up de Data */}
-      <Text style={styles.label}>Data da Reunião</Text>
-      <TouchableOpacity style={styles.inputBotao} onPress={() => setShowDatePicker(true)}>
-        <Text style={dataString ? styles.textoPreenchido : styles.textoPlaceholder}>
-          {dataString ? dataString : '📅 Toque para escolher a data'}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Pop-up do Calendário */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={dataSelecionada}
-          mode="date"
-          display="default"
-          onChange={aoMudarData}
-        />
-      )}
-
-      <View style={styles.row}>
-        <View style={styles.coluna}>
-          {/* Botão que abre o Pop-up de Hora */}
-          <Text style={styles.label}>Início</Text>
-          <TouchableOpacity style={styles.inputBotao} onPress={() => setShowTimePicker(true)}>
-            <Text style={horaString ? styles.textoPreenchido : styles.textoPlaceholder}>
-              {horaString ? horaString : '⏰ Escolher'}
+          <Text style={styles.label}>Data da Reunião</Text>
+          <TouchableOpacity style={styles.inputBotao} onPress={() => { Keyboard.dismiss(); setShowDatePicker(true); }}>
+            <Text style={dataString ? styles.textoPreenchido : styles.textoPlaceholder}>
+              {dataString ? dataString : '📅 Toque para escolher a data'}
             </Text>
           </TouchableOpacity>
 
-          {/* Pop-up do Relógio */}
-          {showTimePicker && (
-            <DateTimePicker
-              value={horaSelecionada}
-              mode="time"
-              is24Hour={true}
-              display="default"
-              onChange={aoMudarHora}
-            />
-          )}
-        </View>
+          {showDatePicker && <DateTimePicker value={dataSelecionada} mode="date" display="default" onChange={aoMudarData} />}
 
-        <View style={styles.coluna}>
-          <Text style={styles.label}>Duração (Min)</Text>
-          <TextInput style={styles.input} placeholder="Ex: 60" keyboardType="numeric" value={duracao} onChangeText={setDuracao} />
-        </View>
-      </View>
+          <View style={styles.row}>
+            <View style={styles.coluna}>
+              <Text style={styles.label}>Início</Text>
+              <TouchableOpacity style={styles.inputBotao} onPress={() => { Keyboard.dismiss(); setShowTimePicker(true); }}>
+                <Text style={horaString ? styles.textoPreenchido : styles.textoPlaceholder}>{horaString ? horaString : '⏰ Escolher'}</Text>
+              </TouchableOpacity>
+              {showTimePicker && <DateTimePicker value={horaSelecionada} mode="time" is24Hour={true} display="default" onChange={aoMudarHora} />}
+            </View>
 
-      <TouchableOpacity style={styles.botao} onPress={salvarAgendamento}>
-        <Text style={styles.textoBotao}>Confirmar Agendamento</Text>
-      </TouchableOpacity>
-    </View>
+            <View style={styles.coluna}>
+              <Text style={styles.label}>Duração (Min)</Text>
+              <TextInput style={styles.input} placeholder="Ex: 60" keyboardType="numeric" value={duracao} onChangeText={setDuracao} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
+            </View>
+          </View>
+
+          <TouchableOpacity style={styles.botao} onPress={salvarAgendamento}>
+            <Text style={styles.textoBotao}>Confirmar Agendamento</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F0F4F8', padding: 20, paddingTop: 50 },
+  flexContainer: { flex: 1, backgroundColor: '#F0F4F8' },
+  container: { flex: 1, padding: 20, paddingTop: 50 },
   header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, color: '#102A43' },
   label: { fontSize: 16, color: '#334E68', marginBottom: 5, fontWeight: '600' },
   input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D9E2EC', padding: 12, borderRadius: 8, marginBottom: 15 },
-  // Novos estilos para os botões que substituíram os TextInputs
   inputBotao: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D9E2EC', padding: 15, borderRadius: 8, marginBottom: 15, justifyContent: 'center' },
   textoPlaceholder: { color: '#9FB3C8', fontSize: 16 },
   textoPreenchido: { color: '#334E68', fontSize: 16, fontWeight: '500' },
