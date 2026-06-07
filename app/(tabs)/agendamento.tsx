@@ -6,12 +6,14 @@ import {
 import { useRouter } from 'expo-router'; 
 import { db } from '../../src/database/databaseInit';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Notifications from 'expo-notifications';
 
 export default function AgendamentoScreen() {
   const router = useRouter(); 
 
   const [idSala, setIdSala] = useState<string>('');
-  const [duracao, setDuracao] = useState<string>('');
+  const [duracaoHoras, setDuracaoHoras] = useState<string>('1'); 
+  const [duracaoMinutos, setDuracaoMinutos] = useState<string>('0');
 
   const [dataSelecionada, setDataSelecionada] = useState<Date>(new Date());
   const [horaSelecionada, setHoraSelecionada] = useState<Date>(new Date());
@@ -25,8 +27,7 @@ export default function AgendamentoScreen() {
     if (Platform.OS === 'android') setShowDatePicker(false);
     if (selectedDate && event.type !== 'dismissed') {
       setDataSelecionada(selectedDate);
-      const formatada = selectedDate.toISOString().split('T')[0];
-      setDataString(formatada);
+      setDataString(selectedDate.toISOString().split('T')[0]);
     }
   };
 
@@ -40,134 +41,137 @@ export default function AgendamentoScreen() {
     }
   };
 
-  function calcularHorarioTermino(horaBase: string, minutosAdicionais: number) {
-    const [hora, minuto] = horaBase.split(':').map(Number);
-    const tempo = new Date();
-    tempo.setHours(hora, minuto, 0, 0);
-    tempo.setMinutes(tempo.getMinutes() + minutosAdicionais);
-    const hh = String(tempo.getHours()).padStart(2, '0');
-    const mm = String(tempo.getMinutes()).padStart(2, '0');
-    return `${hh}:${mm}`;
+  async function agendarNotificacaoLocal(dataS: string, horaS: string, sala: string) {
+    try {
+      const [ano, mes, dia] = dataS.split('-').map(Number);
+      const [hora, min] = horaS.split(':').map(Number);
+
+      const dataReuniao = new Date(ano, mes - 1, dia, hora, min);
+
+      const gatilhoNotificacao = new Date(dataReuniao.getTime() - (15 * 60 * 1000));
+      const agora = new Date();
+
+      if (gatilhoNotificacao <= agora) {
+        return; 
+      }
+
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "⏱️ Reunião se aproximando!",
+          body: `Sua reserva na Sala ${sala} começa em 15 minutos.`,
+          sound: true,
+        },
+        trigger: gatilhoNotificacao,
+      });
+      console.log(`🔔 Notificação agendada para: ${gatilhoNotificacao.toString()}`);
+    } catch (error) {
+      console.error("Erro ao agendar notificação:", error);
+    }
   }
 
   function salvarAgendamento() {
     Keyboard.dismiss();
 
-    if (!idSala || !dataString || !horaString || !duracao) {
-      Alert.alert('Atenção', 'Por favor, preencha todos os campos!');
+    if (!idSala || !dataString || !horaString) {
+      Alert.alert('Erro', 'Preencha a sala, data e horário!');
       return;
     }
 
     try {
-      const salaID = parseInt(idSala);
-      const salaExiste = db.getFirstSync<{id: number}>('SELECT id FROM salas WHERE id = ?', [salaID]);
-      
-      if (!salaExiste) {
-        Alert.alert('Erro', `A sala com ID ${salaID} não existe.`);
-        return; 
+      const h = parseInt(duracaoHoras || '0');
+      const m = parseInt(duracaoMinutos || '0');
+      const tempoTotalMinutos = (h * 60) + m;
+
+      if (tempoTotalMinutos <= 0) {
+        Alert.alert('Erro', 'A duração deve ser maior que zero!');
+        return;
       }
 
       const sessao = db.getFirstSync<{id_usuario: number}>('SELECT id_usuario FROM sessao LIMIT 1');
-      if (!sessao) {
-        Alert.alert('Sessão Expirada', 'Por favor, faça login novamente.');
-        router.replace('/login');
-        return;
-      }
+      if (!sessao) return router.replace('/login');
 
-      const tempoReuniao = parseInt(duracao);
-      const tempoOrganizacao = 20; 
-      const horarioTerminoTotal = calcularHorarioTermino(horaString, tempoReuniao + tempoOrganizacao);
+      const [hora, min] = horaString.split(':').map(Number);
+      const fim = new Date();
+      fim.setHours(hora, min + tempoTotalMinutos + 20);
+      const horarioTerminoTotal = `${String(fim.getHours()).padStart(2, '0')}:${String(fim.getMinutes()).padStart(2, '0')}`;
 
-      // 🛑 NOVA TRAVA: CHECAGEM DE CONFLITO DE HORÁRIOS (DOUBLE BOOKING)
-      // A lógica: Um horário cruza com outro se o "Início A" for MENOR que o "Término B" 
-      // E o "Término A" for MAIOR que o "Início B".
       const conflito = db.getFirstSync<{id: number}>(
-        `SELECT id FROM agendamentos 
-         WHERE id_sala = ? AND data = ? 
-         AND (horario_inicio < ? AND horario_termino > ?)`,
-        [salaID, dataString, horarioTerminoTotal, horaString]
+        `SELECT id FROM agendamentos WHERE id_sala = ? AND data = ? AND (horario_inicio < ? AND horario_termino > ?)`,
+        [idSala, dataString, horarioTerminoTotal, horaString]
       );
 
       if (conflito) {
-        Alert.alert(
-          'Horário Indisponível', 
-          'Já existe uma reserva que entra em conflito com este horário nesta sala. Verifique a agenda.'
-        );
+        Alert.alert('Conflito', 'Já existe uma reunião neste horário!');
         return;
       }
-      // -------------------------------------------------------------
 
       db.runSync(
         'INSERT INTO agendamentos (id_usuario, id_sala, data, horario_inicio, horario_termino) VALUES (?, ?, ?, ?, ?)',
-        [sessao.id_usuario, salaID, dataString, horaString, horarioTerminoTotal]
+        [sessao.id_usuario, idSala, dataString, horaString, horarioTerminoTotal]
       );
       
-      setIdSala(''); setDuracao(''); setDataString(''); setHoraString('');
+      // Chame a função de agendamento aqui antes de fechar a tela
+      agendarNotificacaoLocal(dataString, horaString, idSala);
 
-      Alert.alert(
-        'Sucesso', 
-        `Reunião salva.\nBloqueio até ${horarioTerminoTotal} (inclui 20min de organização).`, 
-        [{ text: 'OK', onPress: () => router.navigate('/') }]
-      );
-    } catch (error) {
-      console.error(error);
-      Alert.alert('Erro', 'Não foi possível salvar o agendamento.');
-    }
+      Alert.alert('Sucesso', 'Reserva confirmada!', [{ text: 'OK', onPress: () => router.navigate('/') }]);
+    } catch (e) { console.error(e); }
   }
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <KeyboardAvoidingView style={styles.flexContainer} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.container}>
-          <Text style={styles.header}>Novo Agendamento</Text>
-          
-          <Text style={styles.label}>ID da Sala (Ex: 1 ou 2)</Text>
-          <TextInput style={styles.input} keyboardType="numeric" value={idSala} onChangeText={setIdSala} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
+      <View style={styles.container}>
+        <Text style={styles.header}>Reservar Sala</Text>
+        
+        <View style={styles.card}>
+          <Text style={styles.label}>Nº da Sala</Text>
+          <TextInput style={styles.input} keyboardType="numeric" placeholder="Ex: 1" value={idSala} onChangeText={setIdSala} />
 
-          <Text style={styles.label}>Data da Reunião</Text>
-          <TouchableOpacity style={styles.inputBotao} onPress={() => { Keyboard.dismiss(); setShowDatePicker(true); }}>
-            <Text style={dataString ? styles.textoPreenchido : styles.textoPlaceholder}>
-              {dataString ? dataString : '📅 Toque para escolher a data'}
-            </Text>
-          </TouchableOpacity>
-
-          {showDatePicker && <DateTimePicker value={dataSelecionada} mode="date" display="default" onChange={aoMudarData} />}
-
+          <Text style={styles.label}>Data e Hora de Início</Text>
           <View style={styles.row}>
-            <View style={styles.coluna}>
-              <Text style={styles.label}>Início</Text>
-              <TouchableOpacity style={styles.inputBotao} onPress={() => { Keyboard.dismiss(); setShowTimePicker(true); }}>
-                <Text style={horaString ? styles.textoPreenchido : styles.textoPlaceholder}>{horaString ? horaString : '⏰ Escolher'}</Text>
-              </TouchableOpacity>
-              {showTimePicker && <DateTimePicker value={horaSelecionada} mode="time" is24Hour={true} display="default" onChange={aoMudarHora} />}
-            </View>
+            <TouchableOpacity style={[styles.inputBotao, {flex: 1, marginRight: 10}]} onPress={() => setShowDatePicker(true)}>
+              <Text style={styles.textoBotaoFalso}>{dataString || '📅 Data'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.inputBotao, {flex: 1}]} onPress={() => setShowTimePicker(true)}>
+              <Text style={styles.textoBotaoFalso}>{horaString || '⏰ Hora'}</Text>
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.coluna}>
-              <Text style={styles.label}>Duração (Min)</Text>
-              <TextInput style={styles.input} placeholder="Ex: 60" keyboardType="numeric" value={duracao} onChangeText={setDuracao} returnKeyType="done" onSubmitEditing={Keyboard.dismiss} />
+          <Text style={styles.label}>Duração da Reunião</Text>
+          <View style={styles.row}>
+            <View style={styles.inputGrupo}>
+              <TextInput style={styles.inputPequeno} keyboardType="numeric" value={duracaoHoras} onChangeText={setDuracaoHoras} maxLength={2} />
+              <Text style={styles.legendaInput}>Horas</Text>
+            </View>
+            <View style={styles.inputGrupo}>
+              <TextInput style={styles.inputPequeno} keyboardType="numeric" value={duracaoMinutos} onChangeText={setDuracaoMinutos} maxLength={2} />
+              <Text style={styles.legendaInput}>Minutos</Text>
             </View>
           </View>
 
-          <TouchableOpacity style={styles.botao} onPress={salvarAgendamento}>
-            <Text style={styles.textoBotao}>Confirmar Agendamento</Text>
+          <TouchableOpacity style={styles.botaoPrincipal} onPress={salvarAgendamento}>
+            <Text style={styles.textoBranco}>Confirmar Reserva</Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+
+        {showDatePicker && <DateTimePicker value={dataSelecionada} mode="date" onChange={aoMudarData} />}
+        {showTimePicker && <DateTimePicker value={horaSelecionada} mode="time" is24Hour={true} onChange={aoMudarHora} />}
+      </View>
     </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
-  flexContainer: { flex: 1, backgroundColor: '#F0F4F8' },
-  container: { flex: 1, padding: 20, paddingTop: 50 },
-  header: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, color: '#102A43' },
-  label: { fontSize: 16, color: '#334E68', marginBottom: 5, fontWeight: '600' },
-  input: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D9E2EC', padding: 12, borderRadius: 8, marginBottom: 15 },
-  inputBotao: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#D9E2EC', padding: 15, borderRadius: 8, marginBottom: 15, justifyContent: 'center' },
-  textoPlaceholder: { color: '#9FB3C8', fontSize: 16 },
-  textoPreenchido: { color: '#334E68', fontSize: 16, fontWeight: '500' },
-  row: { flexDirection: 'row', justifyContent: 'space-between' },
-  coluna: { width: '48%' }, 
-  botao: { backgroundColor: '#007BFF', padding: 15, borderRadius: 8, alignItems: 'center', marginTop: 10 },
-  textoBotao: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }
+  container: { flex: 1, backgroundColor: '#F0F4F8', padding: 20, paddingTop: 60 },
+  header: { fontSize: 28, fontWeight: 'bold', color: '#102A43', marginBottom: 25 },
+  card: { backgroundColor: '#FFF', padding: 20, borderRadius: 15, elevation: 4, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 4 },
+  label: { fontSize: 14, fontWeight: 'bold', color: '#334E68', marginBottom: 8, marginTop: 10 },
+  input: { backgroundColor: '#F0F4F8', padding: 12, borderRadius: 10, fontSize: 16, color: '#102A43' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
+  inputBotao: { backgroundColor: '#F0F4F8', padding: 12, borderRadius: 10, alignItems: 'center' },
+  textoBotaoFalso: { color: '#102A43', fontSize: 16 },
+  inputGrupo: { flex: 1, alignItems: 'center', marginHorizontal: 5 },
+  inputPequeno: { backgroundColor: '#F0F4F8', width: '100%', textAlign: 'center', padding: 12, borderRadius: 10, fontSize: 18, fontWeight: 'bold' },
+  legendaInput: { fontSize: 12, color: '#627D98', marginTop: 5 },
+  botaoPrincipal: { backgroundColor: '#007BFF', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 30 },
+  textoBranco: { color: '#FFF', fontSize: 18, fontWeight: 'bold' }
 });

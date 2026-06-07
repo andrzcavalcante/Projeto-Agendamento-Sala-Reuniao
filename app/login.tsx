@@ -14,12 +14,11 @@ import {
 import { useRouter } from 'expo-router';
 import { db } from '../src/database/databaseInit';
 
-// 🔒 LISTA DE E-MAILS PERMITIDOS (Apenas estes acessam o app)
 const EMAILS_PERMITIDOS = [
   'admin@instituicao.br',
   'alc@mail.com',
-  'andre.cavalcante@instituicao.br', 
-  // Pode colar a sua série de e-mails aqui dentro, sempre entre aspas e separados por vírgula
+  'andre@mail.com', 
+  'giva@mail.com'
 ];
 
 export default function LoginScreen() {
@@ -42,7 +41,6 @@ export default function LoginScreen() {
 
     Keyboard.dismiss();
 
-    // 🛑 VALIDAÇÃO DA WHITELIST
     if (!EMAILS_PERMITIDOS.includes(emailTratado)) {
       Alert.alert(
         'Acesso Restrito', 

@@ -27,18 +27,14 @@ export default function ListaSalasScreen() {
 
   function carregarSalas() {
     try {
-      // --- 🔒 TRAVA DE SEGURANÇA (VERIFICA O LOGIN) ---
-      // Vai no banco e olha se tem alguém na tabela de sessão
+
       const sessao = db.getFirstSync<{id_usuario: number}>('SELECT id_usuario FROM sessao LIMIT 1');
       
-      // Se não encontrou uma sessão ativa, expulsa para a tela de login imediatamente
       if (!sessao) {
         router.replace('/login');
         return; 
       }
-      // ------------------------------------------------
 
-      // Se passou da trava, carrega as salas normalmente
       const query = `
         SELECT s.*, 
         (SELECT COUNT(*) FROM agendamentos a WHERE a.id_sala = s.id) AS qtd_agendamentos
@@ -47,8 +43,8 @@ export default function ListaSalasScreen() {
       const resultado = db.getAllSync<Sala>(query);
       
       if (resultado.length === 0) {
-        db.runSync("INSERT INTO salas (nome_sala, capacidade, recursos) VALUES ('Sala A - Reunião', 10, 'TV e Quadro Branco')");
-        db.runSync("INSERT INTO salas (nome_sala, capacidade, recursos) VALUES ('Sala B - Mentoria', 4, 'Projetor')");
+        db.runSync("INSERT INTO salas (nome_sala, capacidade, recursos) VALUES ('Sala 1 - Reunião', 10, 'TV')");
+        db.runSync("INSERT INTO salas (nome_sala, capacidade, recursos) VALUES ('Sala 2 - Mentoria', 4, 'Monitor')");
         setSalas([...db.getAllSync<Sala>(query)]); 
       } else {
         setSalas([...resultado]);

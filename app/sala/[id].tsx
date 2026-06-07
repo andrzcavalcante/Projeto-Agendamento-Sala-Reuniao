@@ -5,6 +5,8 @@ import { db } from '../../src/database/databaseInit';
 
 const EMAIL_ADMIN = 'admin@instituicao.br';
 
+const ANTECEDENCIA_MINIMA_HORAS = 1; 
+
 interface UsuarioAtual {
   id: number;
   email: string;
@@ -53,7 +55,7 @@ export default function DetalhesSalaScreen() {
       setAgenda(agendamentos);
       
     } catch (error) {
-      console.error("Erro ao buscar detalhes:", error);
+      console.error("Erro ao carregar agenda:", error);
     }
   }
 
@@ -78,22 +80,21 @@ export default function DetalhesSalaScreen() {
       return;
     }
 
-    // 🛑 CORREÇÃO APLICADA AQUI: Retirado o item.id que estava causando o bug de sintaxe
     const diferencaEmHoras = calcularDiferencaHoras(item.data, item.horario_inicio);
 
-    if (!ehAdmin && diferencaEmHoras < 3) {
+    if (!ehAdmin && diferencaEmHoras < ANTECEDENCIA_MINIMA_HORAS) {
       Alert.alert(
         'Cancelamento Bloqueado', 
-        'Faltam menos de 3 horas para a reunião. Não é possível realizar o cancelamento.'
+        `Falta menos de ${ANTECEDENCIA_MINIMA_HORAS} hora para a reunião. Alterações não são permitidas.`
       );
       return;
     }
 
     Alert.alert(
-      'Atenção',
-      `Deseja realmente cancelar a reserva das ${item.horario_inicio}?`,
+      'Confirmar Cancelamento',
+      `Deseja realmente liberar a sala no dia ${item.data} às ${item.horario_inicio}?`,
       [
-        { text: 'Não', style: 'cancel' },
+        { text: 'Voltar', style: 'cancel' },
         { text: 'Sim, Cancelar', style: 'destructive', onPress: () => executarCancelamento(item.id) }
       ]
     );
@@ -102,37 +103,25 @@ export default function DetalhesSalaScreen() {
   function executarCancelamento(idAgendamento: number) {
     try {
       db.runSync('DELETE FROM agendamentos WHERE id = ?', [idAgendamento]);
-      Alert.alert('Sucesso', 'Reserva cancelada com sucesso!');
+      Alert.alert('Sucesso', 'Reserva removida da agenda.');
       carregarDetalhes(); 
     } catch (error) {
-      Alert.alert('Erro', 'Não foi possível cancelar.');
+      Alert.alert('Erro', 'Não foi possível processar o cancelamento.');
     }
   }
 
   function tentarAlterar(item: Agendamento) {
-    if (!usuarioAtual) return;
-
-    const ehAdmin = usuarioAtual.email === EMAIL_ADMIN;
-    const ehDonoDaReserva = usuarioAtual.id === item.id_usuario;
-
-    if (!ehDonoDaReserva && !ehAdmin) {
-      Alert.alert('Acesso Negado', 'Você só pode alterar as suas próprias reservas.');
-      return;
-    }
-
     const diferencaEmHoras = calcularDiferencaHoras(item.data, item.horario_inicio);
+    const ehAdmin = usuarioAtual?.email === EMAIL_ADMIN;
 
-    if (!ehAdmin && diferencaEmHoras < 3) {
-      Alert.alert(
-        'Alteração Bloqueada', 
-        'Faltam menos de 3 horas para o início do agendamento. Modificações de horário não são permitidas dentro dessa janela.'
-      );
+    if (!ehAdmin && diferencaEmHoras < ANTECEDENCIA_MINIMA_HORAS) {
+      Alert.alert('Bloqueado', `Modificações só podem ser feitas com ${ANTECEDENCIA_MINIMA_HORAS}h de antecedência.`);
       return;
     }
 
     Alert.alert(
-      'Alterar Horário',
-      'Para alterar o horário mantendo a integridade da agenda, libere este espaço atual clicando em Cancelar e faça uma nova reserva.',
+      'Ajustar Reserva',
+      'Para garantir que não haja choque de horários, cancele esta reserva e crie uma nova com o horário desejado.',
       [
         { text: 'Voltar', style: 'cancel' },
         { text: 'Ir para Novo Agendamento', onPress: () => router.navigate('/agendamento') }
@@ -140,30 +129,29 @@ export default function DetalhesSalaScreen() {
     );
   }
 
-  const renderizarAgendamento = ({ item }: { item: Agendamento }) => {
+  const renderizarItem = ({ item }: { item: Agendamento }) => {
     const [ano, mes, dia] = item.data.split('-');
     const dataFormatada = `${dia}/${mes}/${ano}`;
-
-    const podeVerBotoes = usuarioAtual?.email === EMAIL_ADMIN || usuarioAtual?.id === item.id_usuario;
+    const podeEditar = usuarioAtual?.email === EMAIL_ADMIN || usuarioAtual?.id === item.id_usuario;
 
     return (
-      <View style={styles.cardAgenda}>
-        <View style={styles.dataContainer}>
+      <View style={styles.card}>
+        <View style={styles.headerCard}>
           <Text style={styles.dataTexto}>📅 {dataFormatada}</Text>
-          <Text style={styles.donoTexto}>👤 {item.nome_usuario}</Text>
-        </View>
-        <View style={styles.horaContainer}>
-          <Text style={styles.horaTexto}>⏱️ {item.horario_inicio} até {item.horario_termino}</Text>
+          <Text style={styles.usuarioTexto}>👤 {item.nome_usuario}</Text>
         </View>
 
-        {podeVerBotoes && (
-          <View style={styles.botoesAcao}>
-            <TouchableOpacity style={styles.botaoAlterar} onPress={() => tentarAlterar(item)}>
-              <Text style={styles.textoBotaoAcao}>Alterar</Text>
+        <Text style={styles.horarioTexto}>
+          🕒 {item.horario_inicio} — {item.horario_termino}
+        </Text>
+
+        {podeEditar && (
+          <View style={styles.containerBotoes}>
+            <TouchableOpacity style={styles.btnAlterar} onPress={() => tentarAlterar(item)}>
+              <Text style={styles.btnTexto}>Alterar</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={styles.botaoCancelar} onPress={() => tentarCancelar(item)}>
-              <Text style={styles.textoBotaoAcao}>Cancelar</Text>
+            <TouchableOpacity style={styles.btnCancelar} onPress={() => tentarCancelar(item)}>
+              <Text style={styles.btnTexto}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -173,21 +161,21 @@ export default function DetalhesSalaScreen() {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity style={styles.botaoVoltar} onPress={() => router.back()}>
-        <Text style={styles.textoBotaoVoltar}>← Voltar</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.header}>Agenda: {nomeSala}</Text>
+      <View style={styles.topo}>
+        <Text style={styles.subTitulo}>Histórico e Próximas Reuniões</Text>
+        <Text style={styles.tituloSala}>{nomeSala}</Text>
+      </View>
 
       {agenda.length === 0 ? (
-        <View style={styles.vazioContainer}>
-          <Text style={styles.vazioTexto}>Nenhum agendamento para esta sala.</Text>
+        <View style={styles.vazio}>
+          <Text style={styles.vazioTexto}>Nenhuma reserva encontrada para esta sala.</Text>
         </View>
       ) : (
         <FlatList 
           data={agenda}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={renderizarAgendamento}
+          renderItem={renderizarItem}
+          contentContainerStyle={{ paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -196,23 +184,34 @@ export default function DetalhesSalaScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F0F4F8', padding: 20, paddingTop: 50 },
-  botaoVoltar: { paddingVertical: 10, marginBottom: 10, alignSelf: 'flex-start' },
-  textoBotaoVoltar: { fontSize: 16, color: '#007BFF', fontWeight: 'bold' },
-  header: { fontSize: 22, fontWeight: 'bold', color: '#102A43', marginBottom: 20 },
+  container: { flex: 1, backgroundColor: '#F0F4F8', paddingHorizontal: 20 },
+  topo: { marginTop: 20, marginBottom: 20 },
+  subTitulo: { fontSize: 14, color: '#627D98', textTransform: 'uppercase', fontWeight: 'bold' },
+  tituloSala: { fontSize: 26, fontWeight: 'bold', color: '#102A43' },
   
-  cardAgenda: { backgroundColor: '#FFF', padding: 15, borderRadius: 10, marginBottom: 15, borderLeftWidth: 5, borderLeftColor: '#007BFF', elevation: 2 },
-  dataContainer: { borderBottomWidth: 1, borderBottomColor: '#F0F4F8', paddingBottom: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between' },
+  card: { 
+    backgroundColor: '#FFF', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginBottom: 15, 
+    elevation: 3, 
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 4,
+    borderLeftWidth: 6,
+    borderLeftColor: '#007BFF'
+  },
+  headerCard: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   dataTexto: { fontSize: 16, fontWeight: 'bold', color: '#334E68' },
-  donoTexto: { fontSize: 14, color: '#627D98', fontStyle: 'italic' },
-  horaContainer: { marginBottom: 15 },
-  horaTexto: { fontSize: 15, color: '#102A43', fontWeight: '500' },
+  usuarioTexto: { fontSize: 14, color: '#627D98', fontStyle: 'italic' },
+  horarioTexto: { fontSize: 17, color: '#102A43', fontWeight: '600', marginBottom: 15 },
+  
+  containerBotoes: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, borderTopWidth: 1, borderTopColor: '#F0F4F8', paddingTop: 12 },
+  btnAlterar: { backgroundColor: '#FFC107', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6 },
+  btnCancelar: { backgroundColor: '#DC3545', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 6 },
+  btnTexto: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
 
-  botoesAcao: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: 1, borderTopColor: '#F0F4F8', paddingTop: 10 },
-  botaoAlterar: { backgroundColor: '#FFC107', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 5, marginRight: 10 },
-  botaoCancelar: { backgroundColor: '#DC3545', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 5 },
-  textoBotaoAcao: { color: '#FFF', fontSize: 14, fontWeight: 'bold' },
-
-  vazioContainer: { alignItems: 'center', marginTop: 50 },
-  vazioTexto: { fontSize: 18, color: '#334E68', fontWeight: 'bold' }
+  vazio: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 50 },
+  vazioTexto: { fontSize: 16, color: '#486581', textAlign: 'center' }
 });

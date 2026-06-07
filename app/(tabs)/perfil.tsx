@@ -23,7 +23,6 @@ export default function PerfilScreen() {
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
 
-  // Toda vez que a aba Perfil for aberta, busca os dados do usuário no banco
   useFocusEffect(
     useCallback(() => {
       try {
@@ -66,7 +65,6 @@ export default function PerfilScreen() {
     }
 
     try {
-      // Atualiza o registro do usuário com os dados finais e a nova senha
       db.runSync(
         'UPDATE usuarios SET nome = ?, cargo_setor = ?, senha = ? WHERE id = ?',
         [nome, cargo, senha, usuarioId]

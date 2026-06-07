@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 
 // Forçamos a criação de um banco V3, limpo e com a nova estrutura de senha
-export const db = SQLite.openDatabaseSync('agendamento_salas_v3.db');
+export const db = SQLite.openDatabaseSync('agendamento_salas_v4.db');
 
 export function inicializarBancoDeDados() {
   try {

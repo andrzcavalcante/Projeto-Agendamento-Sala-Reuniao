@@ -1,24 +1,47 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import * as Notifications from 'expo-notifications';
+import { Alert, Platform } from 'react-native';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  
+  useEffect(() => {
+    solicitarPermissaoNotificacao();
+  }, []);
+
+  async function solicitarPermissaoNotificacao() {
+    const { status: statusExistente } = await Notifications.getPermissionsAsync();
+    let statusFinal = statusExistente;
+    
+    if (statusExistente !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      statusFinal = status;
+    }
+    
+    if (statusFinal !== 'granted' && Platform.OS !== 'web') {
+      Alert.alert('Atenção', 'As notificações de proximidade de reunião não funcionarão sem permissão.');
+    }
+  }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack screenOptions={{ 
+      headerStyle: { backgroundColor: '#F0F4F8' },
+      headerTintColor: '#102A43',
+      headerTitleStyle: { fontWeight: 'bold' },
+      headerBackTitle: 'Voltar',
+    }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="sala/[id]" options={{ headerTitle: 'Agenda da Sala', headerShown: true }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+    </Stack>
   );
 }
